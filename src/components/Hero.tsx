@@ -49,7 +49,7 @@ export function Hero() {
             Get In Touch
           </a>
           <a 
-            href="/resume.pdf" 
+            href="public\Surya_Saketh_Prattipati_Resume.pdf" 
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-3 bg-transparent border border-white/20 text-white px-8 py-4 rounded-full font-sans font-medium hover:bg-white/10 transition-colors"
