@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <link rel="icon" type="image/x-icon" href="./assets/favicon.png">
+    <script>
+      const originalFetch = window.fetch;
+      Object.defineProperty(window, 'fetch', {
+        get: () => originalFetch,
+        set: (val) => {
+          console.warn("Attempt to overwrite window.fetch ignored to prevent TypeError.");
+        },
+        configurable: true
+      });
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Surya saketh</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,8 @@
+{
+  "name": "Surya Saketh Portfolio",
+  "description": "High-end minimalist personal portfolio with organic 3D motion design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
