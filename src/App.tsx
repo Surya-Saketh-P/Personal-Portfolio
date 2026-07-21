@@ -9,6 +9,7 @@ import { FloatingObjects } from "./components/FloatingObjects";
 import { DynamicBackground } from "./components/DynamicBackground";
 import { SmoothScroll } from "./components/SmoothScroll";
 import { QuoteSection } from "./components/QuoteSection";
+import ChessPopup from "./components/ChessPopup";
 
 export default function App() {
   return (
@@ -18,12 +19,14 @@ export default function App() {
         <Cursor />
         <FloatingObjects />
         <main className="flex-1 relative z-10">
+          
           <Hero />
           <About />
           <Projects />
           <Experience />
           <Contact />
           <QuoteSection />
+          <ChessPopup/>
         </main>
         <Footer />
       </div>
