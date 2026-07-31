@@ -6,13 +6,16 @@ export default function ChessPopup() {
     const [isopen, setIsOpen] = useState(false);
     const [game, setGame] = useState(new Chess());
     return (
-        <>
+        <div className="relative">
             {isopen && (
             <div className="fixed bottom-6 right-6 w-[400px] bg-zinc-900 border border-gray-700 rounded-2xl shadow-2xl p-4 z-50">
 
-                <button onClick={() => setIsOpen(false)}>
-                    x
-                </button>
+            <button 
+            onClick={() => setIsOpen(false)} 
+            className="absolute top-2 right-2 w-8 h-8 bg-gray-700 hover:bg-gray-600 text-white rounded-full flex items-center justify-center font-bold z-10"
+            >
+            ✕
+            </button>
                 
                 <Chessboard />
             </div>
@@ -31,6 +34,6 @@ export default function ChessPopup() {
                     </div>
                 </button>
             )}
-        </>
+        </div>
     );
 }
