@@ -8,7 +8,11 @@
 // MODEL to gpt-4o-mini, and the env var to OPENAI_API_KEY.
 
 const API_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-const MODEL = "gemini-2.5-flash";
+// gemini-2.5-flash was retired for new API keys ("no longer available to new
+// users", 404 NOT_FOUND). gemini-3.5-flash-lite is the current stable,
+// low-cost/low-latency model - a good fit for short chat-bubble replies.
+// See: https://ai.google.dev/gemini-api/docs/models
+const MODEL = "gemini-3.5-flash-lite";
 
 // >>> EDIT THIS: facts the bot is allowed to share about you <<<
 const ABOUT_ME = `
@@ -20,7 +24,7 @@ const ABOUT_ME = `
   2. Personal Finance Dashboard: A state-managed data visualization prototype built under the wire during a hackathon
 - Currently: Hunting for a fast-paced Software Engineering internship and organizing massive hackathons with industry partners like Meta, Hugging Face, and PyTorch
 - Contact: Drop me a line at suryasaketh.prattipati@gmail.com or connect on LinkedIn
-- Fun facts: 24-hour game jam survivor, gym enthusiast, coffee addict
+- Fun facts: 48-hour hackathons survivor, gym enthusiast, coffee addict
 `;
 
 function buildSystemPrompt(gameContext = {}) {
@@ -96,27 +100,19 @@ export default async function handler(req, res) {
           { role: "system", content: buildSystemPrompt(gameContext) },
           ...history,
         ],
-        max_tokens: 120,
+        max_tokens: 300,
         temperature: 0.95,
-        // NOTE: presence_penalty/frequency_penalty are only honored by Gemini's
-        // 3.x model family via the OpenAI-compat layer; sending them to
-        // gemini-2.5-flash triggers a 400 INVALID_ARGUMENT. Variety is instead
-        // enforced via the system prompt instruction not to repeat jokes.
+        // gemini-3.5-flash-lite can't fully disable thinking (reasoning_effort:
+        // "none" is only honored by the older 2.5 family), so keep it minimal
+        // to leave the token budget for the actual reply instead of reasoning.
+        reasoning_effort: "minimal",
       }),
     });
 
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => "");
       console.error("LLM upstream error", upstream.status, detail);
-      // TEMP DEBUG: surface the real upstream error to the client so we can
-      // read it in the Network tab. Remove `detail` from the response once
-      // the integration is confirmed working - don't ship this to a stable
-      // production build long-term.
-      return res.status(502).json({
-        error: "LLM upstream error",
-        status: upstream.status,
-        detail: detail.slice(0, 500),
-      });
+      return res.status(502).json({ error: "LLM upstream error" });
     }
 
     const data = await upstream.json();
