@@ -21,7 +21,7 @@ export function Contact() {
       </ScrollReveal>
       
       <div className="mt-32 flex gap-12 font-sans text-muted tracking-widest uppercase text-sm">
-        <a href="https://linkedin.com/in/surya-saketh" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">LinkedIn</a>
+        <a href="https://www.linkedin.com/in/surya-saketh-prattipati-160779347/" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">LinkedIn</a>
         <a href="https://github.com/Surya-Saketh-P" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">GitHub</a>
         <a href="https://leetcode.com/u/Surya_saketh/" target="_blank" rel="noreferrer" className="hover:text-white transition-colors">LeetCode</a>
       </div>
