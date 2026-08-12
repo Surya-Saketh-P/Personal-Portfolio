@@ -98,8 +98,10 @@ export default async function handler(req, res) {
         ],
         max_tokens: 120,
         temperature: 0.95,
-        presence_penalty: 0.6, // discourages repeating earlier phrasing
-        frequency_penalty: 0.4,
+        // NOTE: presence_penalty/frequency_penalty are only honored by Gemini's
+        // 3.x model family via the OpenAI-compat layer; sending them to
+        // gemini-2.5-flash triggers a 400 INVALID_ARGUMENT. Variety is instead
+        // enforced via the system prompt instruction not to repeat jokes.
       }),
     });
 
