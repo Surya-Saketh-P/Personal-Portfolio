@@ -108,7 +108,15 @@ export default async function handler(req, res) {
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => "");
       console.error("LLM upstream error", upstream.status, detail);
-      return res.status(502).json({ error: "LLM upstream error" });
+      // TEMP DEBUG: surface the real upstream error to the client so we can
+      // read it in the Network tab. Remove `detail` from the response once
+      // the integration is confirmed working - don't ship this to a stable
+      // production build long-term.
+      return res.status(502).json({
+        error: "LLM upstream error",
+        status: upstream.status,
+        detail: detail.slice(0, 500),
+      });
     }
 
     const data = await upstream.json();
