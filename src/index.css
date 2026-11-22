@@ -1,10 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --color-bg: #050505;
+  --font-display: "Plus Jakarta Sans", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: #070707;
   --color-fg: #f5f5f5;
   --color-muted: #888888;
 }
@@ -27,8 +27,44 @@ body {
 
 /* ── Selection ────────────────────────────────── */
 ::selection {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(99, 102, 241, 0.25);
   color: #fff;
+}
+
+/* ── Sound Equalizer Bars ─────────────────────── */
+.sound-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2.5px;
+  height: 12px;
+}
+
+.sound-bars i {
+  display: block;
+  width: 2px;
+  height: 3px;
+  background-color: currentColor;
+  border-radius: 1px;
+  transition: height 0.2s ease;
+}
+
+.sound-bars.is-active i:nth-child(1) {
+  animation: eqPulse 0.75s ease-in-out infinite alternate;
+}
+.sound-bars.is-active i:nth-child(2) {
+  animation: eqPulse 1.05s ease-in-out 0.2s infinite alternate;
+}
+.sound-bars.is-active i:nth-child(3) {
+  animation: eqPulse 0.85s ease-in-out 0.4s infinite alternate;
+}
+.sound-bars.is-active i:nth-child(4) {
+  animation: eqPulse 1.15s ease-in-out 0.15s infinite alternate;
+}
+
+@keyframes eqPulse {
+  0% { height: 2px; opacity: 0.6; }
+  50% { height: 10px; opacity: 1; }
+  100% { height: 4px; opacity: 0.8; }
 }
 
 /* ── Infinite marquee ─────────────────────────── */

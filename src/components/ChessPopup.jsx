@@ -120,8 +120,18 @@ const FALLBACK_LINES = [
   "Chat's lagging, board isn't. Your move.",
 ];
 
-export default function ChessPopup() {
-  const [isOpen, setIsOpen] = useState(false);
+export default function ChessPopup({ autoOpen = false }) {
+  const [isOpen, setIsOpen] = useState(autoOpen);
+
+  useEffect(() => {
+    if (autoOpen) setIsOpen(true);
+  }, [autoOpen]);
+
+  useEffect(() => {
+    const handleOpen = () => setIsOpen(true);
+    window.addEventListener("open-chess", handleOpen);
+    return () => window.removeEventListener("open-chess", handleOpen);
+  }, []);
   const [isChatOpen, setIsChatOpen] = useState(true);
   const chessGameRef = useRef(new Chess());
   const engineRequestIdRef = useRef(0);
