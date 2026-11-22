@@ -16,10 +16,10 @@ interface Particle {
   size: number;
   shimmer: number;
   phase: number;
+  vis: number;
   vx: number;
   vy: number;
   threshold: number;
-  tint: boolean;
 }
 
 // Chords for generative ambient audio
@@ -34,7 +34,7 @@ const BELL_NOTES = [440, 523.25, 587.33, 659.25, 783.99, 880, 1046.5];
 export function EntryGate({ onEnter }: EntryGateProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [soundOn, setSoundOn] = useState(false);
-  const [track, setTrack] = useState<"drift" | "pulse">("drift");
+  const [track, setTrack] = useState<"drift" | "pulse">("pulse");
   const [hoveredCard, setHoveredCard] = useState<"site" | "story" | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const [loadedProgress, setLoadedProgress] = useState(0);
@@ -56,11 +56,14 @@ export function EntryGate({ onEnter }: EntryGateProps) {
   const animTimeRef = useRef(0);
   const warpStartRef = useRef(0);
   const modeRef = useRef<"ring" | "site" | "story">("ring");
-  const trackRef = useRef<"drift" | "pulse">("drift");
+  const trackRef = useRef<"drift" | "pulse">("pulse");
   const isLeavingRef = useRef(false);
   const soundOnRef = useRef(false);
   const tiltRef = useRef({ x: 0, y: 0 });
   const pulseRef = useRef(0);
+  const kickTimesRef = useRef<{ time: number; strength: number }[]>([]);
+  const timeArrayRef = useRef<Uint8Array | null>(null);
+  const wavesRef = useRef<{ time: number; origin: number; k: number; amp: number }[]>([]);
   const lastMoveRef = useRef(0);
 
   trackRef.current = track;
@@ -111,10 +114,12 @@ export function EntryGate({ onEnter }: EntryGateProps) {
       masterGainRef.current = master;
 
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.2;
       master.connect(analyser);
       analyserRef.current = analyser;
       dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+      timeArrayRef.current = new Uint8Array(analyser.fftSize);
 
       const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
@@ -211,7 +216,8 @@ export function EntryGate({ onEnter }: EntryGateProps) {
         master.gain.cancelScheduledValues(ctx.currentTime);
         master.gain.linearRampToValueAtTime(0.8, ctx.currentTime + 1.2);
 
-        // Start ambient chord sequence
+        // Ambient pads + chimes belong to Drift only; Pulse has its own lofi band
+        if (trackRef.current === "drift") {
         let chordIdx = 0;
         playChord(AMBIENT_CHORDS[0], 9);
         audioIntervalRef.current = window.setInterval(() => {
@@ -226,6 +232,7 @@ export function EntryGate({ onEnter }: EntryGateProps) {
           chimeTimeoutRef.current = window.setTimeout(scheduleChime, next);
         };
         chimeTimeoutRef.current = window.setTimeout(scheduleChime, 1500);
+        }
       }
     } else {
       if (audioIntervalRef.current) clearInterval(audioIntervalRef.current);
@@ -244,35 +251,172 @@ export function EntryGate({ onEnter }: EntryGateProps) {
       if (chimeTimeoutRef.current) clearTimeout(chimeTimeoutRef.current);
       if (pulseIntervalRef.current) clearInterval(pulseIntervalRef.current);
     };
-  }, [soundOn, initAudio, playChord, playChime]);
+  }, [soundOn, track, initAudio, playChord, playChime]);
 
-  // Handle pulse track kicks
+  // Lofi engine (Pulse mode only): notes are scheduled on the audio clock and every hit
+  // spawns a random travelling wave on the ring, so visuals land exactly with the sound.
   useEffect(() => {
-    if (track === "pulse" && soundOn) {
-      const kick = () => {
-        const ctx = audioCtxRef.current;
-        const master = masterGainRef.current;
-        if (!ctx || !master || ctx.state !== "running") return;
+    if (!soundOn || track !== "pulse") return;
+    const ctx = audioCtxRef.current;
+    const master = masterGainRef.current;
+    const filter = filterRef.current;
+    if (!ctx || !master || !filter) return;
 
+    const bpm = 76;
+    const stepDur = 60 / bpm / 4;
+    // Dm9 → G13 → Cmaj9 → Am9
+    const CHORDS = [
+      [146.83, 174.61, 220, 261.63, 329.63],
+      [196, 246.94, 293.66, 349.23, 329.63],
+      [130.81, 164.81, 196, 246.94, 293.66],
+      [110, 130.81, 164.81, 196, 246.94],
+    ];
+    const ROOTS = [73.42, 98, 65.41, 110];
+
+    const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.3), ctx.sampleRate);
+    const nd = noise.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+
+    const hit = (time: number, strength: number, amp: number) => {
+      kickTimesRef.current.push({ time, strength });
+      wavesRef.current.push({
+        time,
+        origin: Math.random() * Math.PI * 2,
+        k: 3 + Math.random() * 4,
+        amp,
+      });
+    };
+
+    const kick = (time: number, gain: number) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.frequency.setValueAtTime(125, time);
+      osc.frequency.exponentialRampToValueAtTime(46, time + 0.16);
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(gain, time + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.38);
+      osc.connect(g).connect(master);
+      osc.start(time);
+      osc.stop(time + 0.42);
+      hit(time, 0.6, 1);
+    };
+
+    const snare = (time: number) => {
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 1800;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.14, time);
+      ng.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+      src.connect(bp).connect(ng).connect(master);
+      src.start(time);
+      const osc = ctx.createOscillator();
+      osc.frequency.value = 190;
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.09, time);
+      og.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+      osc.connect(og).connect(master);
+      osc.start(time);
+      osc.stop(time + 0.14);
+      hit(time, 0.4, 0.65);
+    };
+
+    const hat = (time: number, vol: number) => {
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 8000;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(vol, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.045);
+      src.connect(hp).connect(g).connect(master);
+      src.start(time);
+      src.stop(time + 0.06);
+    };
+
+    const crackle = (time: number) => {
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 3500;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.012, time);
+      g.gain.exponentialRampToValueAtTime(0.0005, time + 0.012);
+      src.connect(hp).connect(g).connect(master);
+      src.start(time, Math.random() * 0.2);
+      src.stop(time + 0.02);
+    };
+
+    const bass = (time: number, freq: number, vol: number) => {
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(vol, time + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
+      osc.connect(g).connect(master);
+      osc.start(time);
+      osc.stop(time + 0.65);
+    };
+
+    const chord = (time: number, freqs: number[], dur: number) => {
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 900;
+      lp.connect(filter);
+      freqs.forEach((f) => {
         const osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.value = f;
+        osc.detune.value = (Math.random() - 0.5) * 14;
         const g = ctx.createGain();
-        const t = ctx.currentTime;
-        osc.frequency.setValueAtTime(100, t);
-        osc.frequency.exponentialRampToValueAtTime(36, t + 0.2);
-        g.gain.setValueAtTime(0.3, t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+        g.gain.setValueAtTime(0.0001, time);
+        g.gain.linearRampToValueAtTime(0.035, time + 0.12);
+        g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+        osc.connect(g).connect(lp);
+        osc.start(time);
+        osc.stop(time + dur + 0.05);
+      });
+    };
 
-        osc.connect(g).connect(master);
-        osc.start(t);
-        osc.stop(t + 0.4);
-      };
+    const scheduleStep = (n: number, baseTime: number) => {
+      const bar = Math.floor(n / 16) % 4;
+      const k = n % 16;
+      // Lazy swing on the offbeat 16ths + tiny human timing drift
+      const time = baseTime + (k % 4 === 2 ? stepDur * 0.35 : 0) + (Math.random() - 0.5) * 0.012;
 
-      kick();
-      pulseIntervalRef.current = window.setInterval(kick, 1200);
-      return () => {
-        if (pulseIntervalRef.current) clearInterval(pulseIntervalRef.current);
-      };
-    }
+      if (k === 0) {
+        chord(time, CHORDS[bar], stepDur * 16);
+        bass(time, ROOTS[bar], 0.3);
+      }
+      if (k === 0 || k === 10) kick(time, k === 0 ? 0.5 : 0.4);
+      if (k === 7) kick(time, 0.25);
+      if (k === 4 || k === 12) snare(time);
+      if (k === 6) bass(time, ROOTS[bar], 0.2);
+      if (k % 2 === 0) hat(time, (k % 4 === 0 ? 0.025 : 0.04) * (0.7 + Math.random() * 0.5));
+      if (Math.random() < 0.2) crackle(time + Math.random() * stepDur);
+    };
+
+    let step = 0;
+    let nextTime = ctx.currentTime + 0.2;
+    const id = window.setInterval(() => {
+      while (nextTime < ctx.currentTime + 0.2) {
+        scheduleStep(step, nextTime);
+        nextTime += stepDur;
+        step++;
+      }
+    }, 30);
+
+    return () => {
+      clearInterval(id);
+      kickTimesRef.current = [];
+      wavesRef.current = [];
+    };
   }, [track, soundOn]);
 
   // ── Particle Canvas Physics & Rendering ───────────────────
@@ -295,7 +439,7 @@ export function EntryGate({ onEnter }: EntryGateProps) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       if (particlesRef.current.length === 0) {
-        const count = width < 648 ? 900 : 2400;
+        const count = width < 648 ? 1200 : 3200;
         const goldenRatio = Math.PI * (3 - Math.sqrt(5));
         const pts: Particle[] = [];
         for (let i = 0; i < count; i++) {
@@ -309,13 +453,13 @@ export function EntryGate({ onEnter }: EntryGateProps) {
             ring: Math.random(),
             arm: i % 3,
             t: Math.random(),
-            size: 0.55 + Math.random() * 1.15,
+            size: 0.9 + Math.random() * 0.7,
             shimmer: Math.random() * Math.PI * 2,
             phase: Math.random() * Math.PI * 2,
+            vis: 1,
             vx: 0,
             vy: 0,
             threshold: Math.random(),
-            tint: Math.random() < 0.25,
           });
         }
         particlesRef.current = pts;
@@ -356,21 +500,30 @@ export function EntryGate({ onEnter }: EntryGateProps) {
       animTimeRef.current += 1 / 60;
       const t = animTimeRef.current;
       const pts = particlesRef.current;
+      const ringCount = width < 648 ? 520 : 800; // dots in the default ring
+      const siteCount = width < 648 ? 520 : 1000; // dots in the "site" grid hover
+      const DOT_SCALE = 1.35; // dot size multiplier shared by ring, site and story
       const cx = width / 2;
       const cy = height / 2;
       const currentMode = modeRef.current;
-      const currentTrack = trackRef.current;
       const leaving = isLeavingRef.current;
 
-      // Read audio energy for pulse
+      // Beat clock: only Pulse mode logs hits, so Drift stays perfectly still
       let audioPulse = 0;
-      if (analyserRef.current && dataArrayRef.current && soundOnRef.current) {
-        analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-        let sum = 0;
-        for (let i = 0; i < 8; i++) {
-          sum += dataArrayRef.current[i];
+      let audioNow = 0;
+      const actx = audioCtxRef.current;
+      if (actx && soundOnRef.current && actx.state === "running") {
+        audioNow = actx.currentTime - ((actx.outputLatency || 0) + (actx.baseLatency || 0));
+        const hits = kickTimesRef.current;
+        while (hits.length > 1 && hits[1].time <= audioNow - 1) hits.shift();
+        for (let i = hits.length - 1; i >= 0; i--) {
+          if (hits[i].time <= audioNow) {
+            audioPulse = hits[i].strength * Math.exp(-(audioNow - hits[i].time) * 6);
+            break;
+          }
         }
-        audioPulse = Math.min(1, (sum / 8 / 255) * (currentTrack === "pulse" ? 2.6 : 1.1));
+        const ws = wavesRef.current;
+        while (ws.length > 1 && ws[1].time <= audioNow - 3) ws.shift();
       }
 
       ctx.clearRect(0, 0, width, height);
@@ -387,9 +540,11 @@ export function EntryGate({ onEnter }: EntryGateProps) {
       tiltRef.current.y += (goalY - tiltRef.current.y) * 0.05;
 
       // Smoothed pulse: instant attack, quick decay so every beat reads clearly
-      pulseRef.current = Math.max(audioPulse, pulseRef.current * 0.9);
+      pulseRef.current = Math.max(audioPulse, pulseRef.current * 0.88);
       const pulse = pulseRef.current;
 
+      const ringR = baseRadius * 0.84;
+      const TWO_PI = Math.PI * 2;
       const project = (angle: number, rad: number, z3: number) => {
         const x3 = Math.cos(angle) * rad;
         const y3 = Math.sin(angle) * rad;
@@ -402,25 +557,9 @@ export function EntryGate({ onEnter }: EntryGateProps) {
         return { x: cx + x2 * persp, y: cy + y1 * persp, depth: z2 / baseRadius };
       };
 
-      // Hairline guide ring that swells with the beat
-      if (!leaving && currentMode === "ring") {
-        ctx.beginPath();
-        ctx.ellipse(
-          cx,
-          cy,
-          Math.abs(baseRadius * (1 + pulse * 0.08) * Math.cos(tiltRef.current.x)),
-          Math.abs(baseRadius * (1 + pulse * 0.08) * Math.cos(tiltRef.current.y)),
-          0,
-          0,
-          Math.PI * 2
-        );
-        ctx.strokeStyle = `rgba(165, 180, 255, ${0.06 + pulse * 0.35})`;
-        ctx.lineWidth = 1 + pulse * 1.5;
-        ctx.stroke();
-      }
-
       pts.forEach((p, idx) => {
         let depth = 0;
+        let waveBoost = 0;
         if (leaving) {
           // Warp drive explosion outward
           if (!p.vx && !p.vy) {
@@ -443,28 +582,51 @@ export function EntryGate({ onEnter }: EntryGateProps) {
           if (currentMode === "site") {
             // Perspective 3D Dot Grid (40 columns)
             const cols = 40;
-            const totalRows = Math.ceil(pts.length / cols);
+            const totalRows = Math.ceil(siteCount / cols);
             const gridW = Math.min(width * 0.85, 1100);
             const gridH = gridW * 0.52;
             const col = idx % cols;
-            const row = Math.floor(idx / cols);
+            const row = Math.min(Math.floor(idx / cols), totalRows - 1);
             targetX = cx - gridW / 2 + (col / (cols - 1)) * gridW;
             targetY = cy - gridH / 2 + (row / (totalRows - 1)) * gridH;
           } else if (currentMode === "story") {
-            // 3-armed 3D Logarithmic Spiral Galaxy
-            const dist = Math.pow(p.t, 0.7) * baseRadius * 1.35;
-            const theta = p.arm * (Math.PI * 2 / 3) + p.t * 4.2 + t * 0.25;
-            const rx = Math.cos(theta) * dist + (p.ring - 0.5) * 24;
-            const ry = Math.sin(theta) * dist;
+            // Thick, dense 3-armed spiral galaxy with a packed core
+            const tt = Math.pow(p.t, 1.25);
+            const dist = tt * baseRadius * 1.3;
+            const theta = p.arm * ((Math.PI * 2) / 3) + tt * 5 + t * 0.05;
+            const spread = (0.03 + tt * 0.17) * baseRadius;
+            const off = (p.ring - 0.5) * 2 * spread;
+            const off2 = Math.sin(p.phase * 3.1) * spread * 0.5;
+            const cosT = Math.cos(theta);
+            const sinT = Math.sin(theta);
+            const rx = cosT * (dist + off2) - sinT * off;
+            const ry = sinT * (dist + off2) + cosT * off;
             const persp = 900 / (900 + ry * 0.6);
             targetX = cx + rx * persp;
-            targetY = cy + ry * 0.38 * persp;
+            targetY = cy + ry * 0.42 * persp;
           } else {
             // Default Ring / Torus Orbit
-            // Thin, dense 3D band that tilts with the cursor and swells on every beat
-            const angle = p.angle + t * 0.12;
-            const rad = baseRadius * (0.965 + p.ring * 0.07) * (1 + pulse * 0.08);
-            const z3 = (p.ring - 0.5) * baseRadius * 0.12;
+            // Clean ring; each beat sends a random ripple travelling around it
+            const angle = p.angle + t * 0.045;
+            let wave = 0;
+            const waves = wavesRef.current;
+            for (let wi = 0; wi < waves.length; wi++) {
+              const w = waves[wi];
+              const dt = audioNow - w.time;
+              if (dt < 0 || dt > 2.2) continue;
+              let d = Math.abs((((angle - w.origin) % TWO_PI) + TWO_PI) % TWO_PI);
+              if (d > Math.PI) d = TWO_PI - d;
+              const x = (d - dt * 4.2) / 0.65;
+              wave +=
+                Math.cos((d - dt * 4.2) * w.k) *
+                Math.exp(-x * x) *
+                Math.exp(-dt * 1.5) *
+                w.amp *
+                (0.6 + 0.4 * Math.sin(p.phase * 4 + dt * 9));
+            }
+            waveBoost = Math.abs(wave);
+            const rad = ringR * (0.94 + p.ring * 0.1) + wave * ringR * 0.09;
+            const z3 = (p.ring - 0.5) * ringR * 0.06 + wave * ringR * 0.08;
             const pr = project(angle, rad, z3);
             targetX = pr.x;
             targetY = pr.y;
@@ -486,39 +648,30 @@ export function EntryGate({ onEnter }: EntryGateProps) {
         }
 
         // Draw particle with luminescence
-        const shimmerOffset = pulse * 7 * Math.sin(t * 8 + p.phase);
-        const radius = (p.size + pulse * 1.4) * (1 + depth * 0.4);
+        const visibleLimit = currentMode === "ring" ? ringCount : currentMode === "site" ? siteCount : pts.length;
+        p.vis += ((idx < visibleLimit ? 1 : 0) - p.vis) * 0.06;
+        const radius =
+          (p.size * DOT_SCALE + pulse * 0.4) * (1 + depth * 0.3 + waveBoost * 0.9);
 
-        let alpha = (0.75 + Math.sin(t * 2 + p.shimmer) * 0.2) * (0.6 + 0.4 * ((depth + 1) / 2));
+        let alpha = 0.9 * (0.7 + 0.3 * ((depth + 1) / 2));
         if (leaving) {
           const elapsed = performance.now() - warpStartRef.current;
           alpha = Math.max(0, 1 - elapsed / 850);
         }
 
-        const a = Math.min(1, Math.max(0, alpha));
-        ctx.fillStyle = p.tint ? `rgba(165, 180, 255, ${a})` : `rgba(240, 242, 255, ${a})`;
+        const a = Math.min(1, Math.max(0, alpha)) * p.vis;
+        if (a < 0.01) return;
+        ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
         ctx.beginPath();
         ctx.arc(
-          p.x + Math.cos(p.shimmer) * shimmerOffset,
-          p.y + Math.sin(p.shimmer) * shimmerOffset,
+          p.x,
+          p.y,
           Math.max(0.5, radius),
           0,
           Math.PI * 2
         );
         ctx.fill();
       });
-
-      // Orbiting satellite with a fading trail (ring mode only)
-      if (!leaving && currentMode === "ring") {
-        for (let i = 0; i < 22; i++) {
-          const sp = project(t * 0.5 - i * 0.035, baseRadius * (1 + pulse * 0.08), 0);
-          const fade = 1 - i / 22;
-          ctx.fillStyle = `rgba(125, 211, 252, ${fade * 0.9})`;
-          ctx.beginPath();
-          ctx.arc(sp.x, sp.y, (1 + fade * 2.2) * (1 + sp.depth * 0.4), 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
 
       animId = requestAnimationFrame(render);
     };
@@ -570,7 +723,7 @@ export function EntryGate({ onEnter }: EntryGateProps) {
         </span>
       </div>
       <div className="absolute top-6 right-6 md:top-8 md:right-10 z-20 flex items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-white/40">
-        <span className="h-1.5 w-1.5 rounded-full bg-sky-300/80 animate-pulse" />
+        <span className="h-1.5 w-1.5 rounded-full bg-white/70 animate-pulse" />
         Portfolio · 2026
       </div>
 
@@ -585,9 +738,7 @@ export function EntryGate({ onEnter }: EntryGateProps) {
         <h1 className="font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-semibold tracking-tight leading-[1.08] text-white mb-8 max-w-2xl">
           How would you like
           <br />
-          <span className="bg-gradient-to-r from-indigo-300 via-violet-300 to-sky-300 bg-clip-text text-transparent">
-            to meet me?
-          </span>
+          to know me?
         </h1>
 
         {/* Counter loading / ready view */}
@@ -608,10 +759,10 @@ export function EntryGate({ onEnter }: EntryGateProps) {
                 onClick={() => handleChoose("site")}
                 onMouseEnter={() => setHoveredCard("site")}
                 onMouseLeave={() => setHoveredCard(null)}
-                className="group relative flex flex-col text-left p-4 sm:p-5 rounded-xl border border-white/[0.08] bg-[#0c0c0c]/80 backdrop-blur-xl transition-all duration-300 hover:border-indigo-400/60 hover:bg-[#121218]/90 hover:-translate-y-1 hover:shadow-[0_0_30px_rgba(129,140,248,0.15)] active:scale-[0.98] cursor-pointer"
+                className="group relative flex flex-col text-left p-4 sm:p-5 rounded-xl border border-white/[0.08] bg-[#0c0c0c]/80 backdrop-blur-xl transition-all duration-300 hover:border-white/40 hover:bg-[#111]/90 hover:-translate-y-1 active:scale-[0.98] cursor-pointer"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="font-mono text-xs text-indigo-400 font-semibold tracking-wider">
+                  <span className="font-mono text-xs text-white/50 font-semibold tracking-wider">
                     01
                   </span>
                   <ArrowUpRight
@@ -633,10 +784,10 @@ export function EntryGate({ onEnter }: EntryGateProps) {
                 onClick={() => handleChoose("story")}
                 onMouseEnter={() => setHoveredCard("story")}
                 onMouseLeave={() => setHoveredCard(null)}
-                className="group relative flex flex-col text-left p-4 sm:p-5 rounded-xl border border-white/[0.08] bg-[#0c0c0c]/80 backdrop-blur-xl transition-all duration-300 hover:border-indigo-400/60 hover:bg-[#121218]/90 hover:-translate-y-1 hover:shadow-[0_0_30px_rgba(129,140,248,0.15)] active:scale-[0.98] cursor-pointer"
+                className="group relative flex flex-col text-left p-4 sm:p-5 rounded-xl border border-white/[0.08] bg-[#0c0c0c]/80 backdrop-blur-xl transition-all duration-300 hover:border-white/40 hover:bg-[#111]/90 hover:-translate-y-1 active:scale-[0.98] cursor-pointer"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="font-mono text-xs text-indigo-400 font-semibold tracking-wider">
+                  <span className="font-mono text-xs text-white/50 font-semibold tracking-wider">
                     02
                   </span>
                   <ArrowUpRight
@@ -662,11 +813,11 @@ export function EntryGate({ onEnter }: EntryGateProps) {
                   onClick={toggleSound}
                   className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border text-xs font-sans transition-all duration-200 cursor-pointer ${
                     soundOn
-                      ? "border-indigo-400/50 bg-indigo-500/10 text-white shadow-[0_0_15px_rgba(99,102,241,0.2)]"
+                      ? "border-white/40 bg-white/10 text-white"
                       : "border-white/[0.08] bg-white/[0.03] text-white/60 hover:text-white hover:border-white/20"
                   }`}
                 >
-                  <span className={`sound-bars ${soundOn ? "is-active text-indigo-400" : "text-white/30"}`}>
+                  <span className={`sound-bars ${soundOn ? "is-active text-white" : "text-white/30"}`}>
                     <i></i><i></i><i></i><i></i>
                   </span>
                   <span>{soundOn ? "Sound on" : ".... Sound off"}</span>
