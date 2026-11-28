@@ -15,7 +15,7 @@ import { ReworkLanding } from "./components/ReworkLanding";
 
 // Flip to false once the portfolio redesign is ready to launch.
 // While true, pass ?preview=gate or ?preview=site in the URL to preview WIP views.
-const UNDER_REWORK = true;
+const UNDER_REWORK = false;
 
 export default function App() {
   const [previewMode] = useState<"gate" | "site" | null>(() => {
