@@ -11,11 +11,24 @@ import { DynamicBackground } from "./components/DynamicBackground";
 import { SmoothScroll } from "./components/SmoothScroll";
 import ChessPopup from "./components/ChessPopup";
 import { EntryGate } from "./components/EntryGate";
+import { ReworkLanding } from "./components/ReworkLanding";
+
+// Flip to false once the portfolio redesign is ready to launch.
+// While true, pass ?preview=gate or ?preview=site in the URL to preview WIP views.
+const UNDER_REWORK = true;
 
 export default function App() {
-  const [view, setView] = useState<"gate" | "site">(() => {
-    // If URL has ?v=site, start on site; otherwise default to entry gate
+  const [previewMode] = useState<"gate" | "site" | null>(() => {
     const params = new URLSearchParams(window.location.search);
+    const preview = params.get("preview");
+    if (preview === "gate" || preview === "site") return preview;
+    return null;
+  });
+
+  const [view, setView] = useState<"gate" | "site">(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("preview") === "site") return "site";
+    if (params.get("preview") === "gate") return "gate";
     return params.get("v") === "site" ? "site" : "gate";
   });
 
@@ -50,6 +63,15 @@ export default function App() {
     url.searchParams.delete("v");
     window.history.pushState({}, "", url.toString());
   };
+
+  if (UNDER_REWORK && !previewMode) {
+    return (
+      <>
+        <Cursor />
+        <ReworkLanding />
+      </>
+    );
+  }
 
   return (
     <>
